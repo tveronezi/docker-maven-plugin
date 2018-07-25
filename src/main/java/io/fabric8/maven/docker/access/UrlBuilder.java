@@ -135,6 +135,10 @@ public final class UrlBuilder {
         return b.build();
     }
 
+    public String waitContainer(String containerId) {
+        return u("containers/%s/wait", containerId).build();
+    }
+
     public String tagContainer(ImageName source, ImageName target, boolean force) {
         return u("images/%s/tag", source.getFullName())
                 .p("repo",target.getNameWithoutTag())

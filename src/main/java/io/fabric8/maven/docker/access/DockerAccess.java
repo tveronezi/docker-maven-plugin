@@ -122,6 +122,13 @@ public interface DockerAccess {
      */
     void stopContainer(String containerId, int killWait) throws DockerAccessException;
 
+    /**
+     * Wait for a container to finish processing and stop.
+     *
+     * @param containerId the container id
+     */
+    void waitContainer(String containerId);
+
     /** Copy an archive (must be a tar) into a running container
      * Get all containers matching a certain label. This might not be a cheap operation especially if many containers
      * are running. Use with care.

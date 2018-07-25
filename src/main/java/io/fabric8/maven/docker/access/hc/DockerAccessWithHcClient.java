@@ -212,6 +212,16 @@ public class DockerAccessWithHcClient implements DockerAccess {
     }
 
     @Override
+    public void waitContainer(String containerId) {
+        try {
+            String url = urlBuilder.waitContainer(containerId);
+            delegate.post(url, HTTP_NO_CONTENT, HTTP_NOT_MODIFIED);
+        } catch (IOException e) {
+            log.debug("Container stopped with an exception: %s", e);
+        }
+    }
+
+    @Override
     public void buildImage(String image, File dockerArchive, BuildOptions options) throws DockerAccessException {
         try {
             String url = urlBuilder.buildImage(image, options);

@@ -119,12 +119,7 @@ public class StartMojo extends AbstractDockerMojo {
             // Queue of images to start as containers
             final Queue<ImageConfiguration> imagesStarting = new ArrayDeque<>();
 
-            // Prepare the shutdown hook for stopping containers if we are going to follow them.  Add the hook before starting any
-            // of the containers so that partial or aborted starts will behave the same as fully-successful ones.
-            if (follow) {
-                runService.addShutdownHookForStoppingContainers(keepContainer, removeVolumes, autoCreateCustomNetworks);
-            }
-
+            final Queue<Future<StartedContainer>> startedContainers = new LinkedList<>();
             // Loop until every image has been started and the start of all images has been completed
             while (!hasBeenAllImagesStarted(imagesWaitingToStart, imagesStarting)) {
 
@@ -132,8 +127,9 @@ public class StartMojo extends AbstractDockerMojo {
                     getImagesWhoseDependenciesHasStarted(imagesWaitingToStart, startedContainerAliases, imageAliases);
 
                 for (final ImageConfiguration image : imagesReadyToStart) {
-
-                    startImage(image, hub, containerStartupService, portMappingPropertyWriteHelper);
+                    startedContainers.add(
+                            startImage(image, hub, containerStartupService, portMappingPropertyWriteHelper)
+                    );
 
                     // Move from waiting to starting status
                     imagesStarting.add(image);
@@ -152,7 +148,21 @@ public class StartMojo extends AbstractDockerMojo {
             portMappingPropertyWriteHelper.write();
 
             if (follow) {
-                wait();
+                final DockerAccess access = hub.getDockerAccess();
+                boolean running = true;
+                while (running) {
+                    running = false;
+                    for (Future<StartedContainer> startedContainer : startedContainers) {
+                        final StartedContainer container;
+                        try {
+                            container = startedContainer.get(1, TimeUnit.SECONDS);
+                        } catch (TimeoutException | ExecutionException e) {
+                            running = true;
+                            break;
+                        }
+                        access.waitContainer(container.containerId);
+                    }
+                }
             }
 
             success = true;
@@ -163,6 +173,11 @@ public class StartMojo extends AbstractDockerMojo {
         } catch (IOException e) {
             throw new MojoExecutionException("I/O Error", e);
         } finally {
+            try {
+                runService.stopStartedContainers(keepContainer, removeVolumes, autoCreateCustomNetworks, null);
+            } catch (DockerAccessException | ExecException e) {
+                log.error("Error while stopping containers: %s", e.getMessage());
+            }
             shutdownExecutorService(executorService);
 
             // Rollback if not all could be started
@@ -238,7 +253,7 @@ public class StartMojo extends AbstractDockerMojo {
         }
     }
 
-    private void startImage(final ImageConfiguration image,
+    private Future<StartedContainer> startImage(final ImageConfiguration image,
                             final ServiceHub hub,
                             final ExecutorCompletionService<StartedContainer> startingContainers,
                             final PortMapping.PropertyWriteHelper portMappingPropertyWriteHelper) {
@@ -249,7 +264,7 @@ public class StartMojo extends AbstractDockerMojo {
         final PortMapping portMapping = runService.createPortMapping(runConfig, projProperties);
         final LogDispatcher dispatcher = getLogDispatcher(hub);
 
-        startingContainers.submit(new Callable<StartedContainer>() {
+        return startingContainers.submit(new Callable<StartedContainer>() {
             @Override
             public StartedContainer call() throws Exception {
                 final String containerId = runService.createAndStartContainer(image, portMapping, getPomLabel(), projProperties, project.getBasedir());
